@@ -86,55 +86,37 @@ HEAT_SCALES = {
 }
 
 
-def _color_at(stops, t):
-    """Return the (r, g, b) color at position t (0 to 1) along a list of hex color stops."""
-    t = min(max(t, 0.0), 1.0)
-    pos = t * (len(stops) - 1)
-    i = min(int(pos), len(stops) - 2)
-    frac = pos - i
-    a = [int(stops[i][k:k + 2], 16) for k in (1, 3, 5)]
-    b = [int(stops[i + 1][k:k + 2], 16) for k in (1, 3, 5)]
-    return [a[j] + (b[j] - a[j]) * frac for j in range(3)]
-
-
-def annotated_heatmap(pivot_df, colorscale, value_fmt="{:.0f}", title="", height=680,
-                      colorbar_title="", zmin=None, zmax=None):
+def annotated_heatmap(table_df, colorscale, value_fmt=".0f", title="", height=680,
+                      colorbar_title="", zmin=None, zmax=None, label_prefix=""):
     """
-    Heatmap where every cell also shows its real value as a number (not only a color).
-    The number is white on dark cells and dark on light cells so it is always readable.
-    Cells with no data (NaN) are left empty instead of showing a misleading 0.
+    Heatmap that prints the real value inside every cell (not just a color).
+    plotly picks a readable text color for each cell on its own, and cells with no
+    data (NaN) are simply left empty instead of showing a misleading 0.
+
+    label_prefix is put in front of the row labels (for example "ID ") so plotly always
+    treats them as text and never as numbers.
     """
     stops = HEAT_SCALES[colorscale]
-    z = pivot_df.values.astype(float)
-    lo = np.nanmin(z) if zmin is None else zmin
-    hi = np.nanmax(z) if zmax is None else zmax
-    span = (hi - lo) or 1.0
+    z = table_df.values.astype(float)
+    x_labels = [str(c) for c in table_df.columns]
+    y_labels = [f"{label_prefix}{i}" for i in table_df.index]
 
-    x_labels = [str(c) for c in pivot_df.columns]
-    y_labels = [str(i) for i in pivot_df.index]
+    # plotly draws the first row at the bottom, so flip the rows to keep the first row on top
+    z = z[::-1]
+    y_labels = y_labels[::-1]
 
     fig = go.Figure(go.Heatmap(
-        z=z, x=x_labels, y=y_labels, zmin=lo, zmax=hi,
+        z=z, x=x_labels, y=y_labels,
+        zmin=zmin, zmax=zmax,
         colorscale=[[k / (len(stops) - 1), c] for k, c in enumerate(stops)],
-        colorbar=dict(title=colorbar_title), xgap=1, ygap=1, hoverongaps=False,
+        colorbar=dict(title=colorbar_title),
+        xgap=2, ygap=2,
+        texttemplate="%{z:" + value_fmt + "}",
+        textfont=dict(size=12),
+        hoverongaps=False,
     ))
-
-    # One text label per cell, placed on top of the heatmap
-    for r, y in enumerate(y_labels):
-        for c, x in enumerate(x_labels):
-            v = z[r][c]
-            if np.isnan(v):
-                continue
-            red, green, blue = _color_at(stops, (v - lo) / span)
-            brightness = 0.299 * red + 0.587 * green + 0.114 * blue
-            fig.add_annotation(
-                x=x, y=y, text=value_fmt.format(v), showarrow=False,
-                font=dict(size=9, color="#111111" if brightness > 140 else "#FFFFFF"),
-            )
-
     fig.update_layout(title=title, height=height, margin=dict(l=10, r=10, t=48, b=10))
-    fig.update_xaxes(type="category", side="bottom")
-    fig.update_yaxes(type="category", autorange="reversed")   # first participant at the top
+    fig.update_xaxes(side="top")
     return fig
 
 
@@ -464,7 +446,7 @@ with tabs[0]:
         # annotated_heatmap() prints the real correlation coefficient in every cell,
         # with auto-contrasted text, instead of relying on the color scale alone —
         # this is the "heatmap shows real measures" fix applied everywhere in the app
-        fig = annotated_heatmap(corr, colorscale="RdBu", value_fmt="{:.2f}",
+        fig = annotated_heatmap(corr, colorscale="RdBu", value_fmt=".2f",
                                  title="Correlation Between Key Metrics", height=380, zmin=-1, zmax=1)
         show(fig, h=380)
 
@@ -529,12 +511,24 @@ with tabs[0]:
 
 # ================================================================ 2. Participant heatmaps
 with tabs[1]:
-    st.caption("Per-participant breakdown by weekday — shows how much of each pattern is driven by individuals "
-               "rather than the day of week.")
+    st.caption("Each row is one participant and each column is a day of the week. "
+               "This shows whether activity depends more on the person or on the day.")
     metric = st.radio("Metric", ["Steps", "Sedentary minutes", "Calories"], horizontal=True)
     col_map = {"Steps": "TotalSteps", "Sedentary minutes": "SedentaryMinutes", "Calories": "Calories"}
     cmap_map = {"Steps": "YlOrBr", "Sedentary minutes": "Reds", "Calories": "Blues"}
     col = col_map[metric]
+
+    # A one-line explanation for each metric, so anyone can read the chart without help
+    how_to_read = {
+        "Steps": "Number in each box = average steps walked on that weekday. "
+                 "Darker orange = more steps. The most active participants are at the top.",
+        "Sedentary minutes": "Number in each box = average minutes spent sitting or not moving on that weekday "
+                             "(1,440 minutes = a full day). Darker red = more time inactive.",
+        "Calories": "Number in each box = average calories burned on that weekday. "
+                    "Darker blue = more calories burned.",
+    }
+    st.info("How to read this chart: " + how_to_read[metric] + " An empty box means no data for that day.")
+
     # rows = participant Id, columns = Weekday, cell value = mean of the chosen metric.
     # reindex forces Mon->Sun column order; a participant with no logged day for a
     # given weekday gets a NaN cell, which annotated_heatmap() renders as blank
@@ -543,12 +537,15 @@ with tabs[1]:
              .reindex(columns=WEEKDAY_ORDER)
     # annotated_heatmap prints the real averaged number in every cell (auto-contrasted
     # per cell) instead of relying on the reader to judge the value from color alone
-    fig = annotated_heatmap(pivot, colorscale=cmap_map[metric], value_fmt="{:.0f}",
-                             title=f"Participants' Average {metric} by Weekday",
-                             height=max(560, 22 * len(pivot)), colorbar_title=f"Avg. {metric}")
-    show(fig, h=max(560, 22 * len(pivot)))
+    # Most active participants at the top, so the pattern is easy to see at a glance
+    pivot = pivot.loc[pivot.mean(axis=1).sort_values(ascending=False).index]
+    fig = annotated_heatmap(pivot, colorscale=cmap_map[metric], value_fmt=".0f",
+                             title=f"Average {metric} per participant and weekday",
+                             height=max(560, 26 * len(pivot)), colorbar_title=f"Avg. {metric}",
+                             label_prefix="ID ")
+    show(fig, h=max(560, 26 * len(pivot)))
 
-    section("Ranked view", f"Same data as the table below, sorted by avg. {metric.lower()}")
+    section("Ranked list", f"The same participants as the chart above, with their overall average {metric.lower()} per day")
     ranked = pivot.mean(axis=1).sort_values(ascending=False).round(1).rename(f"Avg. {metric}")
     table(ranked.reset_index().rename(columns={"index": "Id"}), hide_index=True)
 
