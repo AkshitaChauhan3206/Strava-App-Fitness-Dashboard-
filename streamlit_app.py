@@ -27,7 +27,6 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import plotly.express as px
-import plotly.figure_factory as ff
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import streamlit as st
@@ -75,29 +74,67 @@ div[data-testid="stMetric"] {{ display:none; }}
 
 
 # ------------------------------------------------------------------ helpers
-def annotated_heatmap(pivot_df, colorscale, value_fmt="{:.0f}", title="", height=680, colorbar_title=""):
+# Color stops for the heatmaps (same palettes as ColorBrewer). They are defined here, instead
+# of using plotly's built-in names, so we can also work out how dark each cell is and pick
+# a readable text color for the number printed on it.
+HEAT_SCALES = {
+    "YlOrBr": ["#ffffe5", "#fff7bc", "#fee391", "#fec44f", "#fe9929", "#ec7014", "#cc4c02", "#8c2d04"],
+    "Reds": ["#fff5f0", "#fee0d2", "#fcbba1", "#fc9272", "#fb6a4a", "#ef3b2c", "#cb181d", "#99000d"],
+    "Blues": ["#f7fbff", "#deebf7", "#c6dbef", "#9ecae1", "#6baed6", "#4292c6", "#2171b5", "#084594"],
+    "RdBu": ["#67001f", "#b2182b", "#d6604d", "#f4a582", "#fddbc7", "#f7f7f7",
+             "#d1e5f0", "#92c5de", "#4393c3", "#2166ac", "#053061"],
+}
+
+
+def _color_at(stops, t):
+    """Return the (r, g, b) color at position t (0 to 1) along a list of hex color stops."""
+    t = min(max(t, 0.0), 1.0)
+    pos = t * (len(stops) - 1)
+    i = min(int(pos), len(stops) - 2)
+    frac = pos - i
+    a = [int(stops[i][k:k + 2], 16) for k in (1, 3, 5)]
+    b = [int(stops[i + 1][k:k + 2], 16) for k in (1, 3, 5)]
+    return [a[j] + (b[j] - a[j]) * frac for j in range(3)]
+
+
+def annotated_heatmap(pivot_df, colorscale, value_fmt="{:.0f}", title="", height=680,
+                      colorbar_title="", zmin=None, zmax=None):
     """
-    Build a heatmap where every cell shows its real measured value (not just a color),
-    with the text color auto-chosen per cell for readability (light text on dark cells,
-    dark text on light cells) — this is what figure_factory does internally and plain
-    px.imshow does not, which is why we use it specifically for the participant heatmaps.
-    NaN cells (a participant with no logged day for that weekday) are rendered blank.
+    Heatmap where every cell also shows its real value as a number (not only a color).
+    The number is white on dark cells and dark on light cells so it is always readable.
+    Cells with no data (NaN) are left empty instead of showing a misleading 0.
     """
+    stops = HEAT_SCALES[colorscale]
     z = pivot_df.values.astype(float)
-    z_text = [[value_fmt.format(v) if not np.isnan(v) else "" for v in row] for row in z]
-    # ff.create_annotated_heatmap can't color-scale a NaN, so we fill just for the color
-    # mapping and rely on the blank annotation text above to signal "no data" honestly
-    z_for_color = np.where(np.isnan(z), np.nanmin(z) if np.isfinite(np.nanmin(z)) else 0, z)
-    fig = ff.create_annotated_heatmap(
-        z=z_for_color, x=list(pivot_df.columns), y=list(pivot_df.index.astype(str)),
-        annotation_text=z_text, colorscale=colorscale, showscale=True, font_colors=None,
-    )
-    for ann in fig.layout.annotations:
-        ann.font.size = 9
+    lo = np.nanmin(z) if zmin is None else zmin
+    hi = np.nanmax(z) if zmax is None else zmax
+    span = (hi - lo) or 1.0
+
+    x_labels = [str(c) for c in pivot_df.columns]
+    y_labels = [str(i) for i in pivot_df.index]
+
+    fig = go.Figure(go.Heatmap(
+        z=z, x=x_labels, y=y_labels, zmin=lo, zmax=hi,
+        colorscale=[[k / (len(stops) - 1), c] for k, c in enumerate(stops)],
+        colorbar=dict(title=colorbar_title), xgap=1, ygap=1, hoverongaps=False,
+    ))
+
+    # One text label per cell, placed on top of the heatmap
+    for r, y in enumerate(y_labels):
+        for c, x in enumerate(x_labels):
+            v = z[r][c]
+            if np.isnan(v):
+                continue
+            red, green, blue = _color_at(stops, (v - lo) / span)
+            brightness = 0.299 * red + 0.587 * green + 0.114 * blue
+            fig.add_annotation(
+                x=x, y=y, text=value_fmt.format(v), showarrow=False,
+                font=dict(size=9, color="#111111" if brightness > 140 else "#FFFFFF"),
+            )
+
     fig.update_layout(title=title, height=height, margin=dict(l=10, r=10, t=48, b=10))
-    fig.update_xaxes(side="bottom")
-    if colorbar_title:
-        fig.data[0].colorbar.title.text = colorbar_title
+    fig.update_xaxes(type="category", side="bottom")
+    fig.update_yaxes(type="category", autorange="reversed")   # first participant at the top
     return fig
 
 
@@ -428,7 +465,7 @@ with tabs[0]:
         # with auto-contrasted text, instead of relying on the color scale alone —
         # this is the "heatmap shows real measures" fix applied everywhere in the app
         fig = annotated_heatmap(corr, colorscale="RdBu", value_fmt="{:.2f}",
-                                 title="Correlation Between Key Metrics", height=380)
+                                 title="Correlation Between Key Metrics", height=380, zmin=-1, zmax=1)
         show(fig, h=380)
 
     section("Daily rhythm & weekday vs. weekend", "How steps move hour-by-hour, and how weekdays compare to weekends")
