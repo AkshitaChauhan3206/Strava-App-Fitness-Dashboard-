@@ -6,6 +6,9 @@ dataset). Modeled on a Bellabeat/Strava-style wellness case study: merge the
 raw exports, analyze usage patterns, and turn that into a customer-facing
 dashboard and recommendations.
 
+## Github repo link : https://github.com/AkshitaChauhan3206/Strava-App-Fitness-Dashboard-
+## Live steamlit app demo : https://strava-fitbit-dashboard.streamlit.app
+
 ## What's in this project
 
 | File | What it is |
