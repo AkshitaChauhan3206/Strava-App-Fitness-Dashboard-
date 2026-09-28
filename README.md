@@ -10,10 +10,10 @@ dashboard and recommendations.
 
 | File | What it is |
 |---|---|
-| `streamlit_app.py` | The whole app — dashboard, participant heatmaps, SQL lab, recommendations, methodology. Data is embedded in the file (compressed + base64), so there's nothing else to download or configure. |
+| `streamlit_app.py` | The Streamlit app — dashboard, participant heatmaps, SQL lab, recommendations, methodology. Reads `daily_merged.csv` and `hourly_merged.csv` from the same folder. |
 | `EDA_Analysis.ipynb` | Jupyter notebook reproducing the project's core exploratory charts (weekday patterns, participant heatmaps, activity-category breakdown, hourly calorie burn) with pandas/matplotlib/seaborn, plus a written summary and recommendations. |
 | `requirements.txt` | Python dependencies for running the app locally or deploying it. |
-| `daily_merged.csv`, `hourly_merged.csv`, `minute_narrow_merged.csv`, `minute_wide_merged.csv`, `heartrate_seconds_merged.csv` | The 19 raw Fitbit export files, merged down to 5 by time grain (outer joins on `Id` + timestamp, no values corrected). Only `daily_merged` and `hourly_merged` are embedded in the app itself; the finer-grained files are here for reference / further SQL or notebook work. |
+| `daily_merged.csv`, `hourly_merged.csv`, `minute_narrow_merged.csv`, `minute_wide_merged.csv`, `heartrate_seconds_merged.csv` | The 19 raw Fitbit export files, merged down to 5 by time grain (outer joins on `Id` + timestamp, no values corrected). Only `daily_merged` and `hourly_merged` are used by the app; the finer-grained files are for further SQL or notebook work (store them gzipped if they are too big for GitHub). |
 
 ## Data & methodology (short version)
 
@@ -50,8 +50,10 @@ just open it in VS Code, JupyterLab, or GitHub's preview without re-running anyt
 
 ### Option A — Streamlit Community Cloud (free, easiest)
 
-1. Create a GitHub repo and push `streamlit_app.py` and `requirements.txt` to it
-   (the data is embedded in `streamlit_app.py`, so those two files are enough).
+1. Create a GitHub repo and push these **four files to the repo root** (same folder, not inside a sub-folder):
+   `streamlit_app.py`, `requirements.txt`, `daily_merged.csv`, `hourly_merged.csv`.
+   (`requirements.txt` must be named exactly that and must list `plotly`, otherwise the app crashes with
+   `ModuleNotFoundError: plotly`.)
 2. Go to [share.streamlit.io](https://share.streamlit.io) and sign in with GitHub.
 3. Click **"New app"**, pick the repo/branch, and set **Main file path** to
    `streamlit_app.py`.
@@ -62,7 +64,7 @@ just open it in VS Code, JupyterLab, or GitHub's preview without re-running anyt
 
 ### Option B — Any other host that runs Python (Render, Railway, an EC2/VM, etc.)
 
-1. Push the same two files to a repo or upload them to the server.
+1. Push the same four files to a repo or upload them to the server.
 2. Install dependencies: `pip install -r requirements.txt`.
 3. Start the app bound to the host's port, e.g.:
    ```bash
@@ -78,7 +80,7 @@ FROM python:3.11-slim
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY streamlit_app.py .
+COPY streamlit_app.py daily_merged.csv hourly_merged.csv ./
 EXPOSE 8501
 CMD ["streamlit", "run", "streamlit_app.py", "--server.port=8501", "--server.address=0.0.0.0"]
 ```
